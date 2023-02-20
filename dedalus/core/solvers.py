@@ -11,7 +11,7 @@ from . import subsystems
 from .evaluator import Evaluator
 from ..libraries.matsolvers import matsolvers
 from ..tools.config import config
-from ..tools.array import csr_matvecs, scipy_sparse_eigs
+from ..tools.array import csr_matvecs, scipy_sparse_eigs, slepc_target_wrapper, slepc_region_wrapper
 
 import logging
 logger = logging.getLogger(__name__.split('.')[-1])
@@ -46,7 +46,7 @@ class SolverBase:
     """
 
     def __init__(self, problem, ncc_cutoff=1e-6, max_ncc_terms=None, entry_cutoff=1e-12, matrix_coupling=None, matsolver=None,
-                 bc_top=None, tau_left=None, interleave_components=None, store_expanded_matrices=None):
+                 bc_top=None, tau_left=None, interleave_components=None, store_expanded_matrices=None,eigsolver=None,eigparams=None,comm=None):
         # Take attributes from problem
         self.problem = problem
         self.dist = problem.dist
@@ -85,6 +85,15 @@ class SolverBase:
         if isinstance(matsolver, str):
             matsolver = matsolvers[matsolver.lower()]
         self.matsolver = matsolver
+
+        if eigsolver is None:
+            self.eigsolver = config['linear algebra']['MATRIX_EIGENSOLVER']
+
+        if eigparams is None:
+            self.eigparams = config['linear algebra']['MATRIX_EIGENSOLVER_PARAMS']
+
+        self.comm = comm
+            
         if bc_top is None:
             bc_top = config['matrix construction'].getboolean('BC_TOP')
         self.bc_top = bc_top
@@ -204,7 +213,7 @@ class EigenvalueSolver(SolverBase):
             self.eigenvalues, pre_eigenvectors = eig_output
             self.eigenvectors = sp.pre_right @ pre_eigenvectors
 
-    def solve_sparse(self, subproblem, N, target, rebuild_matrices=False, left=False, normalize_left=True, raise_on_mismatch=True, **kw):
+    def solve_sparse(self, comm, subproblem, N, target, eigv, rebuild_matrices=False, left=False, normalize_left=True, raise_on_mismatch=True, **kw):
         """
         Perform targeted sparse eigenvector search for selected subproblem.
         This routine finds a subset of eigenvectors near the specified target.
@@ -239,31 +248,64 @@ class EigenvalueSolver(SolverBase):
         if rebuild_matrices or not hasattr(sp, 'L_min'):
             subsystems.build_subproblem_matrices(self, [sp], ['M', 'L'])
         # Solve as sparse general eigenvalue problem
-        A = (sp.L_min @ sp.pre_right)
-        B = - (sp.M_min @ sp.pre_right)
-        # Solve for the right eigenvectors
-        self.eigenvalues, pre_eigenvectors = scipy_sparse_eigs(A=A, B=B, N=N, target=target, matsolver=self.matsolver, **kw)
-        self.eigenvectors = sp.pre_right @ pre_eigenvectors
-        if left:
-            # Solve for the left eigenvectors
-            # Note: this definition of "left eigenvectors" is consistent with the documentation for scipy.linalg.eig
-            self.left_eigenvalues, self.left_eigenvectors = scipy_sparse_eigs(A=A.getH(),
-                                                                              B=B.getH(),
-                                                                              N=N, target=np.conjugate(target),
-                                                                              matsolver=self.matsolver, **kw)
-            if not np.allclose(self.eigenvalues, np.conjugate(self.left_eigenvalues)):
-                if raise_on_mismatch:
-                    raise RuntimeError("Conjugate of left eigenvalues does not match right eigenvalues. "
-                                       "The full sets of left and right vectors won't form a biorthogonal set. "
-                                       "This error can be disabled by passing raise_on_mismatch=False to "
-                                       "solve_sparse().")
-                else:
-                    logger.warning("Conjugate of left eigenvalues does not match right eigenvalues.")
-            # In absence of above warning, modified_left_eigenvectors forms a biorthogonal set with the right
-            # eigenvectors.
-            if normalize_left:
-                self._normalize_left_eigenvectors()
-            self.modified_left_eigenvectors = self._build_modified_left_eigenvectors()
+
+        if (self.eigsolver=='ScipySparseEigs'):
+            A = (sp.L_min @ sp.pre_right)
+            B = - (sp.M_min @ sp.pre_right)
+            if (eigv[0]==None):
+                eigvpre = None
+            else:
+                eigvpre = eigv@sp.pre_right
+            
+            # Solve for the right eigenvectors
+            self.eigenvalues, pre_eigenvectors = scipy_sparse_eigs(A=A, B=B, N=N, target=target, matsolver=self.matsolver, eigv=eigvpre, **kw)
+            self.eigenvectors = sp.pre_right @ pre_eigenvectors
+            if left:
+                # Solve for the left eigenvectors
+                # Note: this definition of "left eigenvectors" is consistent with the documentation for scipy.linalg.eig
+                self.left_eigenvalues, self.left_eigenvectors = scipy_sparse_eigs(A=A.getH(),
+                                                                                  B=B.getH(),
+                                                                                  N=N, target=np.conjugate(target),
+                                                                                  matsolver=self.matsolver, eigv=np.cong(eigvpre), **kw)
+                if not np.allclose(self.eigenvalues, np.conjugate(self.left_eigenvalues)):
+                    if raise_on_mismatch:
+                        raise RuntimeError("Conjugate of left eigenvalues does not match right eigenvalues. "
+                                           "The full sets of left and right vectors won't form a biorthogonal set. "
+                                           "This error can be disabled by passing raise_on_mismatch=False to "
+                                           "solve_sparse().")
+                    else:
+                        logger.warning("Conjugate of left eigenvalues does not match right eigenvalues.")
+                    # In absence of above warning, modified_left_eigenvectors forms a biorthogonal set with the right
+                    # eigenvectors.
+                if normalize_left:
+                    self._normalize_left_eigenvectors()
+                self.modified_left_eigenvectors = self._build_modified_left_eigenvectors()
+            self.errors = self.eigenvalues*0
+            self.iters = self.eigenvalues*0
+            self.nconv = self.eigenvalues*0
+        elif(self.eigsolver=='SlepcMumps' or self.eigsolver=='SlepcSuperlu_dist'):
+            subsystems.build_subproblem_matrices(self, [subproblem], ['M', 'L'])
+            sp = subproblem
+            #Normalize the matrices by ||A||_{\infty}                                                                                 
+            A = sp.L_min @ sp.pre_right
+            B = -sp.M_min @ sp.pre_right
+            ainf = linalg.norm(A,ord=np.inf)
+            A = A/ainf
+            B = B/ainf
+            A = A.tocsr()
+            B = B.tocsr()
+            if (eigv[0]==None):
+                eigvpre = None
+            else:
+                eigvpre = eigv@sp.pre_right
+
+            self.eigenvalues, self.eigenvectors, self.errors, self.iters, self.nconv = slepc_target_wrapper(comm=comm, A=A, B=B, N=N, target=target, eigv=eigvpre, solver_type=self.eigsolver, params=self.eigparams, **kw)
+
+            if left:
+                raise NotImplementedError()
+            
+        else:
+            raise NotImplementedError()
 
     def set_state(self, index, subsystem):
         """
