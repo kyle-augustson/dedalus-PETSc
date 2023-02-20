@@ -371,24 +371,20 @@ def scipy_sparse_eigs(A, B, N, target, matsolver, eigv, **kw):
     return evals, evecs
 
 def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
-    """                                                                                                                               
-    Perform targeted eigenmode search using the SLEPc parallel sparse solver                                                          
-    for the reformulated generalized eigenvalue problem                                                                               
-                                                                                                                                      
-        A.x = λ B.x  ==>  (A - σB)^I B.x = (1/(λ-σ)) x                                                                                
-                                                                                                                                      
-    for eigenvalues λ near the target σ.                                                                                              
-                                                                                                                                      
-    Parameters                                                                                                                        
-    ----------                                                                                                                        
-    A, B : scipy sparse matrices                                                                                                      
-        Sparse matrices for generalized eigenvalue problem                                                                            
-    N : int                                                                                                                           
-        Number of eigenmodes to return                                                                                                
-    target : complex                                                                                                                  
-        Target σ for eigenvalue search                                                                                                
-                                                                                                                                      
-    Other keyword options passed to scipy.sparse.linalg.eigs.                                                                         
+    """                                                                                                                             
+    Perform targeted eigenmode search using the SLEPc parallel sparse solver 
+    for the reformulated generalized eigenvalue problem  
+    A.x = λ B.x  ==>  (A - σB)^I B.x = (1/(λ-σ)) x f
+    or eigenvalues λ near the target σ.                                                                                            
+    Parameters                                                                                                                     
+    ---------- 
+    A, B : scipy sparse matrices
+    Sparse matrices for generalized eigenvalue problem
+    N : int
+    Number of eigenmodes to return
+    target : complex
+    Target σ for eigenvalue search                                                                                                
+    Other keyword options passed to scipy.sparse.linalg.eigs.
     """
     import os
     import sys
@@ -397,17 +393,11 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
     import slepc4py
     from petsc4py import PETSc
     from slepc4py import SLEPc
-
-        #Set options using opts.set_target_option(value)                                                                                  
     print("Setting Parameters in SLEPc")
-    #petsc4py.init(comm=comm)                                                                                                         
+
     opts = PETSc.Options()
     if (params!=None):
         print("Setting solver parameter(s) "+params)
-        #These DO NOT work, SLEPc & PETSc team should be contacted.                                                                   
-        #petsc4py.init(params)                                                                                                        
-        #slepc4py.init(params)                                                                                                        
-        #Parsing param string                                                                                                         
         tmp = params[1:-1]
         tmp = tmp.split(" ")
         nterms = len(tmp)
@@ -422,50 +412,42 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
             tmp = name.split("_")
             if (tmp[1]=='mumps' and tmp[2]=='icntl'):
                 icntls.append([int(tmp[3]),int(vals[kk])])
-
             if (tmp[1]=='mumps' and tmp[3]=='omp'):
-               set_omp_threads=int(vals[kk])
+                set_omp_threads=int(vals[kk])
             name = name[4:]
 
-    # create SLEPc Eigenvalue solver                                                                                                  
-
-    #Setup matrices in petsc format                                                                                                   
-    print("Creating global matrix A")
     Ap = PETSc.Mat().createAIJ(size=A.shape,csr=(A.indptr, A.indices,A.data),comm=comm)
     Ap.assemble()
     A=0
 
-    #Setup matrices in petsc format                                                                                                   
-    print("Creating global matrix B")
     Bp = PETSc.Mat().createAIJ(size=B.shape,csr=(B.indptr, B.indices,B.data),comm=comm)
     Bp.assemble()
     B=0
 
-    #Setup eigensolver                                                                                                                
     logger.info("Setting up SLEPc eigensolver")
     E = SLEPc.EPS().create(comm)
     E.setOperators(Ap,Bp)
     E.setFromOptions()
-    E.setProblemType(SLEPc.EPS.ProblemType.GNHEP)    # generalized non-Hermitian eigenvalue problem                                   
-
-    #E.setType('krylovschur')                                                                                                         
-    solverType = 'krylovschur' #'arnoldi'                                                                                             
+    E.setProblemType(SLEPc.EPS.ProblemType.GNHEP)
+    
+    solverType = 'krylovschur'
     E.setType(solverType)
-    E.setDimensions(N,PETSc.DECIDE)     # set number of  eigenvalues to compute                                                       
+    E.setDimensions(N,PETSc.DECIDE)
+
     E.setTrueResidual(True)
     Niter = 64
     epsilon = 1e-7
-    E.setTolerances(epsilon,Niter) # Set absolute tolerance and number of iterations                                                  
-
+    E.setTolerances(epsilon,Niter)
+    
     if target is not None:
-        E.setTarget(target)     # set the desired eigenvalue                                                                          
+        E.setTarget(target)
         if (np.abs(target)<1e0):
             E.setConvergenceTest(E.Conv.ABS)
         else:
             E.setConvergenceTest(E.Conv.REL)
 
-    #target = evals[0]                                                                                                                
-    E.setTarget(target)     # set the desired eigenvalue                                                                              
+    E.setTarget(target)
+    
     if (np.abs(target)<1e0):
         E.setConvergenceTest(E.Conv.ABS)
     else:
@@ -476,7 +458,7 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
         tmp = vr.getArray()
         tmp[:] = eigv
         vr.setArray(tmp)
-	E.setInitialSpace(vr)  # set the initial vector                                                                               
+        E.setInitialSpace(vr)
 
     E.setWhichEigenpairs(E.Which.TARGET_IMAGINARY)
     logger.info("Setting up Spectral Transformer")
@@ -498,7 +480,6 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
         PC.setFactorSolverType('mumps')
     elif (solver_type=='SlepcSuperlu_dist'):
         PC.setFactorSolverType('superlu_dist')
-	#PC.setFactorShift(shift_type='nonzero',amount=0.1)                                                                           
     else:
         raise NotImplementedError("SLEPc solver type not implemented.")
 
@@ -510,7 +491,7 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
     if (solver_type=='SlepcMumps'):
         for kk in range(len(icntls)):
             K.setMumpsIcntl(icntls[kk][0],icntls[kk][1])
-    
+
     ST.restoreOperator(K)
     logger.info("Solving")
     E.solve()
@@ -530,19 +511,16 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
     print("Number of converged eigenpairs %d" % nconv)
 
     if (nconv > 0):
-        # Create the results vectors                                                                                                  
-	vr, wr = Ap.getVecs()
-        #                                                                                                                             
+        vr, wr = Ap.getVecs()
         print(" ")
         print("        k          ||Ax-kBx||/||kBx|| ")
         print("----------------- ------------------")
         evals = np.zeros(N,dtype=np.complex128)
-        #print(evals[0])                                                                                                              
         evecs = np.zeros((vr.getSize(),N),dtype=np.complex128)
         errs = np.zeros(N,dtype=np.float64)
         for i in range(np.min([nconv,N])):
             k = E.getEigenpair(i, vr, wr)
-            #print(k.real, k.imag)                                                                                                    
+
             evals[i] = k.real + 1j*k.imag
             evecs[:,i] = vr.getArray()+1j*wr.getArray()
             error = E.computeError(i)
