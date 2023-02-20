@@ -11,7 +11,7 @@ from . import subsystems
 from .evaluator import Evaluator
 from ..libraries.matsolvers import matsolvers
 from ..tools.config import config
-from ..tools.array import csr_matvecs, scipy_sparse_eigs, slepc_target_wrapper, slepc_region_wrapper
+from ..tools.array import csr_matvecs, scipy_sparse_eigs, slepc_target_wrapper #, slepc_region_wrapper
 
 import logging
 logger = logging.getLogger(__name__.split('.')[-1])
@@ -286,7 +286,6 @@ class EigenvalueSolver(SolverBase):
         elif(self.eigsolver=='SlepcMumps' or self.eigsolver=='SlepcSuperlu_dist'):
             subsystems.build_subproblem_matrices(self, [subproblem], ['M', 'L'])
             sp = subproblem
-            #Normalize the matrices by ||A||_{\infty}                                                                                 
             A = sp.L_min @ sp.pre_right
             B = -sp.M_min @ sp.pre_right
             ainf = linalg.norm(A,ord=np.inf)
