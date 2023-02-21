@@ -6,6 +6,7 @@ import time
 import h5py
 import pathlib
 import scipy.linalg
+import scipy.sparse.linalg
 
 from . import subsystems
 from .evaluator import Evaluator
@@ -288,18 +289,19 @@ class EigenvalueSolver(SolverBase):
             sp = subproblem
             A = sp.L_min @ sp.pre_right
             B = -sp.M_min @ sp.pre_right
-            ainf = linalg.norm(A,ord=np.inf)
+            ainf = scipy.sparse.linalg.norm(A,ord=np.inf)
             A = A/ainf
             B = B/ainf
-            A = A.tocsr()
-            B = B.tocsr()
+            #A = A.tocsr()
+            #B = B.tocsr()
             if (eigv[0]==None):
                 eigvpre = None
             else:
                 eigvpre = eigv@sp.pre_right
 
-            self.eigenvalues, self.eigenvectors, self.errors, self.iters, self.nconv = slepc_target_wrapper(comm=comm, A=A, B=B, N=N, target=target, eigv=eigvpre, solver_type=self.eigsolver, params=self.eigparams, **kw)
+            self.eigenvalues, pre_eigenvectors, self.errors, self.iters, self.nconv = slepc_target_wrapper(comm=comm, A=A, B=B, N=N, target=target, eigv=eigvpre, solver_type=self.eigsolver, params=self.eigparams, **kw)
 
+            self.eigenvectors = sp.pre_right @ pre_eigenvectors
             if left:
                 raise NotImplementedError()
             

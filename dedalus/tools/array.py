@@ -393,7 +393,9 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
     import slepc4py
     from petsc4py import PETSc
     from slepc4py import SLEPc
-    print("Setting Parameters in SLEPc")
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("Setting Parameters in SLEPc")
 
     opts = PETSc.Options()
     if (params!=None):
@@ -435,8 +437,8 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
     E.setDimensions(N,PETSc.DECIDE)
 
     E.setTrueResidual(True)
-    Niter = 64
-    epsilon = 1e-7
+    Niter = 512
+    epsilon = 1e-13
     E.setTolerances(epsilon,Niter)
     
     if target is not None:
@@ -510,8 +512,8 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
     nconv = E.getConverged()
     print("Number of converged eigenpairs %d" % nconv)
 
+    vr, wr = Ap.getVecs()
     if (nconv > 0):
-        vr, wr = Ap.getVecs()
         print(" ")
         print("        k          ||Ax-kBx||/||kBx|| ")
         print("----------------- ------------------")
