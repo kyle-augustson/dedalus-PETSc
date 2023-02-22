@@ -214,6 +214,10 @@ class EigenvalueSolver(SolverBase):
             self.eigenvalues, pre_eigenvectors = eig_output
             self.eigenvectors = sp.pre_right @ pre_eigenvectors
 
+        self.errors = self.eigenvalues*0
+        self.iters = 0
+        self.nconv = len(self.eigenvalues)
+
     def solve_sparse(self, comm, subproblem, N, target, eigv, rebuild_matrices=False, left=False, normalize_left=True, raise_on_mismatch=True, **kw):
         """
         Perform targeted sparse eigenvector search for selected subproblem.
@@ -282,8 +286,8 @@ class EigenvalueSolver(SolverBase):
                     self._normalize_left_eigenvectors()
                 self.modified_left_eigenvectors = self._build_modified_left_eigenvectors()
             self.errors = self.eigenvalues*0
-            self.iters = self.eigenvalues*0
-            self.nconv = self.eigenvalues*0
+            self.iters = 0
+            self.nconv = len(self.eigenvalues)
         elif(self.eigsolver=='SlepcMumps' or self.eigsolver=='SlepcSuperlu_dist'):
             subsystems.build_subproblem_matrices(self, [subproblem], ['M', 'L'])
             sp = subproblem
@@ -292,8 +296,7 @@ class EigenvalueSolver(SolverBase):
             ainf = scipy.sparse.linalg.norm(A,ord=np.inf)
             A = A/ainf
             B = B/ainf
-            #A = A.tocsr()
-            #B = B.tocsr()
+
             if (eigv[0]==None):
                 eigvpre = None
             else:

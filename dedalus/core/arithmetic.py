@@ -25,6 +25,9 @@ from ..tools.exceptions import SymbolicParsingError
 from ..tools.exceptions import SkipDispatchException
 from ..tools.general import unify_attributes, DeferredTuple
 
+import logging
+logger = logging.getLogger(__name__)
+
 # Public interface
 __all__ = ['Add',
            'Multiply',
@@ -406,11 +409,17 @@ class Product(Future):
         # TODO: recurse over output bases
         # ASSUME: NCC is on last axis of last output basis
         if self.dist.single_coordsys and not self.dist.single_coordsys.curvilinear:
+            logger.info(str(self))
+            logger.info(np.sum(np.abs(self._ncc_data)>ncc_cutoff))
             return self.build_cartesian_ncc_matrix(subproblem, ncc_cutoff, max_ncc_terms)
         elif len(self.domain.bases) > 0:
+            logger.info(str(self))
+            logger.info(np.sum(np.abs(self._ncc_data)>ncc_cutoff))
             out_basis = self.domain.bases[-1]
             return out_basis.build_ncc_matrix(self, subproblem, ncc_cutoff, max_ncc_terms)
         else:
+            logger.info(str(self))
+            logger.info(np.sum(np.abs(self._ncc_data)>ncc_cutoff))
             return Basis._last_axis_field_ncc_matrix(self, subproblem, 0, None, None, None, self._ncc_data, ncc_cutoff, max_ncc_terms)
 
     def build_cartesian_ncc_matrix(self, subproblem, ncc_cutoff, max_ncc_terms):
