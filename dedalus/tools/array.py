@@ -407,6 +407,7 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
         vals = tmp[1:nterms:2]
         nparams = len(names)
         icntls=[]
+        cntls=[]
         set_omp_threads=1
         for kk in range(nparams):
             tmp = names[kk].split("-")
@@ -414,6 +415,8 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
             tmp = name.split("_")
             if (tmp[1]=='mumps' and tmp[2]=='icntl'):
                 icntls.append([int(tmp[3]),int(vals[kk])])
+            if (tmp[1]=='mumps' and tmp[2]=='cntl'):
+                cntls.append([int(tmp[3]),int(vals[kk])])
             if (tmp[1]=='mumps' and tmp[3]=='omp'):
                 set_omp_threads=int(vals[kk])
             name = name[4:]
@@ -493,6 +496,9 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
     if (solver_type=='SlepcMumps'):
         for kk in range(len(icntls)):
             K.setMumpsIcntl(icntls[kk][0],icntls[kk][1])
+
+        for kk in range(len(cntls)):
+            K.setMumpsCntl(cntls[kk][0],cntls[kk][1])
 
     ST.restoreOperator(K)
     logger.info("Solving")
