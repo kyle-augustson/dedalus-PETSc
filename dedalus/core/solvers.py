@@ -213,7 +213,7 @@ class EigenvalueSolver(SolverBase):
         self.iters = 0
         self.nconv = len(self.eigenvalues)
 
-    def solve_sparse(self, comm, subproblem, N, target, eigv, rebuild_matrices=False, left=False, normalize_left=True, raise_on_mismatch=True, **kw):
+    def solve_sparse(self, subproblem, N, target, eigv=None, rebuild_matrices=False, left=False, normalize_left=True, raise_on_mismatch=True, **kw):
         """
         Perform targeted sparse eigenvector search for selected subproblem.
         This routine finds a subset of eigenvectors near the specified target.
@@ -249,13 +249,14 @@ class EigenvalueSolver(SolverBase):
             subsystems.build_subproblem_matrices(self, [sp], ['M', 'L'])
         # Solve as sparse general eigenvalue problem
 
+        A = (sp.L_min @ sp.pre_right)
+        B = - (sp.M_min @ sp.pre_right)
+        if eigv:
+            eigvpre = eigv@sp.pre_right
+        else:
+            eigvpre = None
+        
         if (self.eigsolver=='ScipySparseEigs'):
-            A = (sp.L_min @ sp.pre_right)
-            B = - (sp.M_min @ sp.pre_right)
-            if (eigv[0]==None):
-                eigvpre = None
-            else:
-                eigvpre = eigv@sp.pre_right
             
             # Solve for the right eigenvectors
             self.eigenvalues, pre_eigenvectors = scipy_sparse_eigs(A=A, B=B, N=N, target=target, matsolver=self.matsolver, eigv=eigvpre, **kw)
@@ -284,18 +285,12 @@ class EigenvalueSolver(SolverBase):
             self.iters = 0
             self.nconv = len(self.eigenvalues)
         elif(self.eigsolver=='SlepcMumps' or self.eigsolver=='SlepcSuperlu_dist'):
-            subsystems.build_subproblem_matrices(self, [subproblem], ['M', 'L'])
-            sp = subproblem
-            A = sp.L_min @ sp.pre_right
-            B = -sp.M_min @ sp.pre_right
-            ainf = scipy.sparse.linalg.norm(A,ord=np.inf)
-            A = A/ainf
-            B = B/ainf
+            #subsystems.build_subproblem_matrices(self, [subproblem], ['M', 'L'])
+            #sp = subproblem
 
-            if (eigv[0]==None):
-                eigvpre = None
-            else:
-                eigvpre = eigv@sp.pre_right
+            ainf = scipy.sparse.linalg.norm(A,ord=np.inf)
+            A = A.T/ainf
+            B = B.T/ainf
 
             self.eigenvalues, pre_eigenvectors, self.errors, self.iters, self.nconv = slepc_target_wrapper(comm=self.dist.comm, A=A, B=B, N=N, target=target, eigv=eigvpre, solver_type=self.eigsolver, params=self.eigparams, **kw)
 

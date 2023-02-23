@@ -398,6 +398,7 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
     logger.debug("Setting Parameters in SLEPc")
 
     opts = PETSc.Options()
+    print(params)
     if (params!=None):
         logger.debug("Setting solver parameter(s) "+params)
         tmp = params[1:-1]
