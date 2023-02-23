@@ -416,7 +416,7 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
             if (tmp[1]=='mumps' and tmp[2]=='icntl'):
                 icntls.append([int(tmp[3]),int(vals[kk])])
             if (tmp[1]=='mumps' and tmp[2]=='cntl'):
-                cntls.append([int(tmp[3]),int(vals[kk])])
+                cntls.append([int(tmp[3]),float(vals[kk])])
             if (tmp[1]=='mumps' and tmp[3]=='omp'):
                 set_omp_threads=int(vals[kk])
             name = name[4:]
