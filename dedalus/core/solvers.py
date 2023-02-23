@@ -252,7 +252,6 @@ class EigenvalueSolver(SolverBase):
         # Rebuild matrices if directed or not yet built
         if rebuild_matrices or not hasattr(sp, 'L_min'):
             subsystems.build_subproblem_matrices(self, [sp], ['M', 'L'])
-        # Solve as sparse general eigenvalue problem
 
         if (self.eigsolver=='ScipySparseEigs'):
             A = (sp.L_min @ sp.pre_right)
@@ -289,8 +288,7 @@ class EigenvalueSolver(SolverBase):
             self.iters = 0
             self.nconv = len(self.eigenvalues)
         elif(self.eigsolver=='SlepcMumps' or self.eigsolver=='SlepcSuperlu_dist'):
-            subsystems.build_subproblem_matrices(self, [subproblem], ['M', 'L'])
-            sp = subproblem
+
             A = sp.L_min @ sp.pre_right
             B = -sp.M_min @ sp.pre_right
             ainf = scipy.sparse.linalg.norm(A,ord=np.inf)
