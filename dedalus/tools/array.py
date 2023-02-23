@@ -395,11 +395,11 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
     from slepc4py import SLEPc
     import logging
     logger = logging.getLogger(__name__)
-    logger.info("Setting Parameters in SLEPc")
+    logger.debug("Setting Parameters in SLEPc")
 
     opts = PETSc.Options()
     if (params!=None):
-        print("Setting solver parameter(s) "+params)
+        logger.debug("Setting solver parameter(s) "+params)
         tmp = params[1:-1]
         tmp = tmp.split(" ")
         nterms = len(tmp)
@@ -429,7 +429,7 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
     Bp.assemble()
     B=0
 
-    logger.info("Setting up SLEPc eigensolver")
+    logger.debug("Setting up SLEPc eigensolver")
     E = SLEPc.EPS().create(comm)
     E.setOperators(Ap,Bp)
     E.setFromOptions()
@@ -466,18 +466,18 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
         E.setInitialSpace(vr)
 
     E.setWhichEigenpairs(E.Which.TARGET_IMAGINARY)
-    logger.info("Setting up Spectral Transformer")
+    logger.debug("Setting up Spectral Transformer")
     ST = E.getST()
     ST.setFromOptions()
     ST.setType('sinvert')
     ST.setUp()
 
-    logger.info("Setting up " + solverType +  " solver")
+    logger.debug("Setting up " + solverType +  " solver")
     KSP = ST.getKSP()
     KSP.setFromOptions()
     KSP.setType('preonly')
 
-    logger.info("Setting up LU Preconditioner")
+    logger.debug("Setting up LU Preconditioner")
     PC =  KSP.getPC()
     PC.setFromOptions()
     PC.setType('lu')
@@ -488,7 +488,7 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
     else:
         raise NotImplementedError("SLEPc solver type not implemented.")
 
-    logger.info("Setting up LU matrix")
+    logger.debug("Setting up LU matrix")
     ST.getOperator()
     PC.setFactorSetUpSolverType()
     K = PC.getFactorMatrix()
@@ -501,28 +501,28 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
             K.setMumpsCntl(cntls[kk][0],cntls[kk][1])
 
     ST.restoreOperator(K)
-    logger.info("Solving")
+    logger.debug("Solving")
     E.solve()
 
     eps_type = E.getType()
-    print("Solution method: %s" % eps_type)
+    logger.debug("Solution method: %s" % eps_type)
     its = E.getIterationNumber()
-    print("Number of iterations of the method: %d" % its)
+    logger.debug("Number of iterations of the method: %d" % its)
 
     nev, ncv, mpd = E.getDimensions()
-    print("Number of requested eigenvalues: %d" % nev)
+    logger.debug("Number of requested eigenvalues: %d" % nev)
 
     tol, maxit = E.getTolerances()
-    print("Stopping condition: tol=%.4g, maxit=%d" % (tol, maxit))
+    logger.debug("Stopping condition: tol=%.4g, maxit=%d" % (tol, maxit))
 
     nconv = E.getConverged()
-    print("Number of converged eigenpairs %d" % nconv)
+    logger.debug("Number of converged eigenpairs %d" % nconv)
 
     vr, wr = Ap.getVecs()
     if (nconv > 0):
-        print(" ")
-        print("        k          ||Ax-kBx||/||kBx|| ")
-        print("----------------- ------------------")
+        logger.debug(" ")
+        logger.debug("        k          ||Ax-kBx||/||kBx|| ")
+        logger.debug("----------------- ------------------")
         evals = np.zeros(N,dtype=np.complex128)
         evecs = np.zeros((vr.getSize(),N),dtype=np.complex128)
         errs = np.zeros(N,dtype=np.float64)
@@ -534,12 +534,12 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
             error = E.computeError(i)
             errs[i] = error
             if k.imag != 0.0:
-                print(" %9f%+9f j %12g" % (k.real, k.imag, error))
+                logger.debug(" %9f%+9f j %12g" % (k.real, k.imag, error))
             else:
-                print(" %12f      %12g" % (k.real, error))
-            print(" ")
+                logger.debug(" %12f      %12g" % (k.real, error))
+            logger.debug(" ")
     else:
-        print("Solver did not converge. Try adjusting solver parameters, or increase resolution and try again.")
+        logger.info("Solver did not converge. Try adjusting solver parameters, or increase resolution and try again.")
         evals = np.zeros(N,dtype=np.complex128)
         errs = np.zeros(N,dtype=np.complex128)
         evecs = np.zeros((vr.getSize(),N),dtype=np.complex128)
