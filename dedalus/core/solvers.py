@@ -47,7 +47,7 @@ class SolverBase:
     """
 
     def __init__(self, problem, ncc_cutoff=1e-6, max_ncc_terms=None, entry_cutoff=1e-12, matrix_coupling=None, matsolver=None,
-                 bc_top=None, tau_left=None, interleave_components=None, store_expanded_matrices=None,eigsolver=None,eigparams=None,comm=None):
+                 bc_top=None, tau_left=None, interleave_components=None, store_expanded_matrices=None,eigsolver=None,eigparams=None):
         # Take attributes from problem
         self.problem = problem
         self.dist = problem.dist
@@ -86,15 +86,10 @@ class SolverBase:
         if isinstance(matsolver, str):
             matsolver = matsolvers[matsolver.lower()]
         self.matsolver = matsolver
-
         if eigsolver is None:
             self.eigsolver = config['linear algebra']['MATRIX_EIGENSOLVER']
-
         if eigparams is None:
             self.eigparams = config['linear algebra']['MATRIX_EIGENSOLVER_PARAMS']
-
-        self.comm = comm
-            
         if bc_top is None:
             bc_top = config['matrix construction'].getboolean('BC_TOP')
         self.bc_top = bc_top
@@ -302,7 +297,7 @@ class EigenvalueSolver(SolverBase):
             else:
                 eigvpre = eigv@sp.pre_right
 
-            self.eigenvalues, pre_eigenvectors, self.errors, self.iters, self.nconv = slepc_target_wrapper(comm=comm, A=A, B=B, N=N, target=target, eigv=eigvpre, solver_type=self.eigsolver, params=self.eigparams, **kw)
+            self.eigenvalues, pre_eigenvectors, self.errors, self.iters, self.nconv = slepc_target_wrapper(comm=self.dist.comm, A=A, B=B, N=N, target=target, eigv=eigvpre, solver_type=self.eigsolver, params=self.eigparams, **kw)
 
             self.eigenvectors = sp.pre_right @ pre_eigenvectors
             if left:
