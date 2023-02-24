@@ -11,7 +11,6 @@ from ..tools.config import config
 
 SPLIT_CSR_MATVECS = config['linear algebra'].getboolean('SPLIT_CSR_MATVECS')
 
-
 def prod(arg):
     if arg:
         return reduce(operator.mul, arg)
@@ -398,7 +397,7 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
     logger.debug("Setting Parameters in SLEPc")
 
     opts = PETSc.Options()
-    print(params)
+
     if (params!=None):
         logger.debug("Setting solver parameter(s) "+params)
         tmp = params[1:-1]
@@ -409,18 +408,29 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
         nparams = len(names)
         icntls=[]
         cntls=[]
-        set_omp_threads=1
+        #set_omp_threads=1
         for kk in range(nparams):
             tmp = names[kk].split("-")
             name = tmp[1]
             tmp = name.split("_")
-            if (tmp[1]=='mumps' and tmp[2]=='icntl'):
-                icntls.append([int(tmp[3]),int(vals[kk])])
-            if (tmp[1]=='mumps' and tmp[2]=='cntl'):
-                cntls.append([int(tmp[3]),float(vals[kk])])
-            if (tmp[1]=='mumps' and tmp[3]=='omp'):
-                set_omp_threads=int(vals[kk])
-            name = name[4:]
+            if (solver_type=='SlepcMumps'):
+                if (tmp[1]=='mumps' and tmp[2]=='icntl'):
+                    opts[name]=int(vals[kk])
+                #    icntls.append([int(tmp[3]),int(vals[kk])])
+                if (tmp[1]=='mumps' and tmp[2]=='cntl'):
+                    opts[name]=float(vals[kk])
+                #    cntls.append([int(tmp[3]),float(vals[kk])])
+                #if (tmp[1]=='mumps' and tmp[3]=='omp'):
+                #    set_omp_threads=int(vals[kk])
+
+            elif (solver_type=='SlepcSuperlu_dist'):
+                opts[name]=vals[kk]
+
+            elif (solver_type=='SlepcSuperlu'):
+                if (tmp[2]=='ilu'):
+                    opts[name]=float(vals[kk])
+                else:
+                    opts[name]=vals[kk]
 
     Ap = PETSc.Mat().createAIJ(size=A.shape,csr=(A.indptr, A.indices,A.data),comm=comm)
     Ap.assemble()
@@ -437,28 +447,28 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
     E.setProblemType(SLEPc.EPS.ProblemType.GNHEP)
     
     solverType = 'krylovschur'
+    #solverType = 'arnoldi'
+    #solverType = 'arpack'
     E.setType(solverType)
-    E.setDimensions(N,PETSc.DECIDE)
+    #E.setDimensions(N,PETSc.DEFAULT,PETSc.DEFAULT)
+    E.setDimensions(N,int(2.5*N),PETSc.DEFAULT)
 
-    E.setTrueResidual(True)
-    Niter = 512
-    epsilon = 1e-13
+    Niter = 100
+    epsilon = 1e-8
     E.setTolerances(epsilon,Niter)
-    
+
     if target is not None:
         E.setTarget(target)
-        if (np.abs(target)<1e0):
-            E.setConvergenceTest(E.Conv.ABS)
-        else:
-            E.setConvergenceTest(E.Conv.REL)
-
-    E.setTarget(target)
-    
-    if (np.abs(target)<1e0):
-        E.setConvergenceTest(E.Conv.ABS)
+        if (solverType!='arpack'):
+            E.setTrueResidual(True)
+            if (np.abs(target)<1e-4):
+                E.setConvergenceTest(E.Conv.ABS)
+            else:
+                E.setConvergenceTest(E.Conv.REL)
     else:
-        E.setConvergenceTest(E.Conv.REL)
-
+        target = 0e0
+        E.setTarget(target)
+    
     if eigv is not None:
         vr, wr = Ap.getVecs()
         tmp = vr.getArray()
@@ -486,6 +496,8 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
         PC.setFactorSolverType('mumps')
     elif (solver_type=='SlepcSuperlu_dist'):
         PC.setFactorSolverType('superlu_dist')
+    elif (solver_type=='SlepcSuperlu'):
+        PC.setFactorSolverType('superlu')
     else:
         raise NotImplementedError("SLEPc solver type not implemented.")
 
@@ -494,12 +506,12 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
     PC.setFactorSetUpSolverType()
     K = PC.getFactorMatrix()
     K.setFromOptions()
-    if (solver_type=='SlepcMumps'):
-        for kk in range(len(icntls)):
-            K.setMumpsIcntl(icntls[kk][0],icntls[kk][1])
-
-        for kk in range(len(cntls)):
-            K.setMumpsCntl(cntls[kk][0],cntls[kk][1])
+    #if (solver_type=='SlepcMumps'):
+    #    for kk in range(len(icntls)):
+    #        K.setMumpsIcntl(icntls[kk][0],icntls[kk][1])
+    #
+    #    for kk in range(len(cntls)):
+    #        K.setMumpsCntl(cntls[kk][0],cntls[kk][1])
 
     ST.restoreOperator(K)
     logger.debug("Solving")

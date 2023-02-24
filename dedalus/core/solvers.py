@@ -284,10 +284,7 @@ class EigenvalueSolver(SolverBase):
             self.errors = self.eigenvalues*0
             self.iters = 0
             self.nconv = len(self.eigenvalues)
-        elif(self.eigsolver=='SlepcMumps' or self.eigsolver=='SlepcSuperlu_dist'):
-            #subsystems.build_subproblem_matrices(self, [subproblem], ['M', 'L'])
-            #sp = subproblem
-
+        elif(self.eigsolver=='SlepcMumps' or self.eigsolver=='SlepcSuperlu_dist' or self.eigsolver=='SlepcSuperlu'):
             ainf = scipy.sparse.linalg.norm(A,ord=np.inf)
             A = A.T/ainf
             B = B.T/ainf
