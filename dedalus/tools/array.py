@@ -358,15 +358,18 @@ def scipy_sparse_eigs(A, B, N, target, matsolver, eigv, **kw):
     Other keyword options passed to scipy.sparse.linalg.eigs.
     """
     # Build sparse linear operator representing (A - σB)^I B = C^I B = D
+    import logging
+    logger = logging.getLogger(__name__)
     C = A - target * B
     solver = matsolver(C)
     def matvec(x):
         return solver.solve(B.dot(x))
     D = spla.LinearOperator(dtype=A.dtype, shape=A.shape, matvec=matvec)
     # Solve using scipy sparse algorithm
-    evals, evecs = spla.eigs(D, k=N, which='LM', sigma=None, v0=eigv, **kw)
+    evals, evecs = spla.eigs(D, k=N, which='LM', sigma=None, v0=eigv, tol=1e-25, **kw)
     # Rectify eigenvalues
     evals = 1 / evals + target
+
     return evals, evecs
 
 def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
@@ -432,11 +435,17 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
                 else:
                     opts[name]=vals[kk]
 
-    Ap = PETSc.Mat().createAIJ(size=A.shape,csr=(A.indptr, A.indices,A.data),comm=comm)
+    
+    #if target==None:
+    #    target = 0e0
+
+    #A = A - target * B
+
+    Ap = PETSc.Mat().createAIJ(size=A.shape,csr=(A.indptr, A.indices, A.data),comm=comm)
     Ap.assemble()
     A=0
 
-    Bp = PETSc.Mat().createAIJ(size=B.shape,csr=(B.indptr, B.indices,B.data),comm=comm)
+    Bp = PETSc.Mat().createAIJ(size=B.shape,csr=(B.indptr, B.indices, B.data),comm=comm)
     Bp.assemble()
     B=0
 
@@ -454,20 +463,16 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
     E.setDimensions(N,int(2.5*N),PETSc.DEFAULT)
 
     Niter = 100
-    epsilon = 1e-8
+    epsilon = 1e-5
     E.setTolerances(epsilon,Niter)
 
-    if target is not None:
-        E.setTarget(target)
-        if (solverType!='arpack'):
-            E.setTrueResidual(True)
-            if (np.abs(target)<1e-4):
-                E.setConvergenceTest(E.Conv.ABS)
-            else:
-                E.setConvergenceTest(E.Conv.REL)
-    else:
-        target = 0e0
-        E.setTarget(target)
+    E.setTarget(target)
+    if (solverType!='arpack'):
+        E.setTrueResidual(True)
+        if (np.abs(target)<1e-4):
+            E.setConvergenceTest(E.Conv.ABS)
+        else:
+            E.setConvergenceTest(E.Conv.REL)
     
     if eigv is not None:
         vr, wr = Ap.getVecs()
@@ -476,7 +481,7 @@ def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
         vr.setArray(tmp)
         E.setInitialSpace(vr)
 
-    E.setWhichEigenpairs(E.Which.TARGET_IMAGINARY)
+    E.setWhichEigenpairs(E.Which.TARGET_MAGNITUDE)
     logger.debug("Setting up Spectral Transformer")
     ST = E.getST()
     ST.setFromOptions()

@@ -261,6 +261,14 @@ class EigenvalueSolver(SolverBase):
             # Solve for the right eigenvectors
             self.eigenvalues, pre_eigenvectors = scipy_sparse_eigs(A=A, B=B, N=N, target=target, matsolver=self.matsolver, eigv=eigvpre, **kw)
             self.eigenvectors = sp.pre_right @ pre_eigenvectors
+            logger.debug("Eigenvalue Error")
+            for ii in range(len(self.eigenvalues)):
+                eval = self.eigenvalues[ii]
+                evec = pre_eigenvectors[:,ii]
+                denom = np.abs(np.sum((np.conj(evec.T)).dot(eval*B.dot(evec))))
+                relerr =np.abs(np.sum((np.conj(evec.T)).dot((A-eval*B).dot(evec))))
+                abserr = relerr/denom
+                logger.debug('eigenvalue %9f+%9fj absolute error %12g  relative error %12g' % (eval.real, eval.imag, abserr, relerr))
             if left:
                 # Solve for the left eigenvectors
                 # Note: this definition of "left eigenvectors" is consistent with the documentation for scipy.linalg.eig
@@ -288,7 +296,7 @@ class EigenvalueSolver(SolverBase):
             ainf = scipy.sparse.linalg.norm(A,ord=np.inf)
             A = A.T/ainf
             B = B.T/ainf
-
+            logger.debug('Shape of A:{}'.format(A.shape))
             self.eigenvalues, pre_eigenvectors, self.errors, self.iters, self.nconv = slepc_target_wrapper(comm=self.dist.comm, A=A, B=B, N=N, target=target, eigv=eigvpre, solver_type=self.eigsolver, params=self.eigparams, **kw)
 
             self.eigenvectors = sp.pre_right @ pre_eigenvectors
