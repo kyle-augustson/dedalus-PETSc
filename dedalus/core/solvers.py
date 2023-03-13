@@ -209,8 +209,8 @@ class EigenvalueSolver(SolverBase):
             self.eigenvalues, pre_eigenvectors = eig_output
             self.eigenvectors = sp.pre_right @ pre_eigenvectors
 
-        self.errors = self.eigenvalues*0
-        self.iters = 0
+        self.errors = np.zeros(len(self.eigenvalues),dtype=np.float64)
+        self.iters = np.zeros(len(self.eigenvalues),dtype=int)
         self.nconv = len(self.eigenvalues)
 
     def solve_sparse(self, subproblem, N, target, eigv=None, rebuild_matrices=False, left=False, normalize_left=True, raise_on_mismatch=True, **kw):
@@ -261,14 +261,14 @@ class EigenvalueSolver(SolverBase):
             # Solve for the right eigenvectors
             self.eigenvalues, pre_eigenvectors = scipy_sparse_eigs(A=A, B=B, N=N, target=target, matsolver=self.matsolver, eigv=eigvpre, **kw)
             self.eigenvectors = sp.pre_right @ pre_eigenvectors
-            logger.debug("Eigenvalue Error")
+            logger.debug("Eigenvalue | Absolute Error | Relative Error")
             for ii in range(len(self.eigenvalues)):
                 eval = self.eigenvalues[ii]
                 evec = pre_eigenvectors[:,ii]
                 denom = np.abs(np.sum((np.conj(evec.T)).dot(eval*B.dot(evec))))
                 relerr =np.abs(np.sum((np.conj(evec.T)).dot((A-eval*B).dot(evec))))
                 abserr = relerr/denom
-                logger.debug('eigenvalue %9f+%9fj absolute error %12g  relative error %12g' % (eval.real, eval.imag, abserr, relerr))
+                logger.debug('%9f+%9fj | %12g | %12g' % (eval.real, eval.imag, abserr, relerr))
             if left:
                 # Solve for the left eigenvectors
                 # Note: this definition of "left eigenvectors" is consistent with the documentation for scipy.linalg.eig
@@ -289,8 +289,8 @@ class EigenvalueSolver(SolverBase):
                 if normalize_left:
                     self._normalize_left_eigenvectors()
                 self.modified_left_eigenvectors = self._build_modified_left_eigenvectors()
-            self.errors = self.eigenvalues*0
-            self.iters = 0
+            self.errors = np.zeros(len(self.eigenvalues),dtype=np.float64)
+            self.iters = np.zeros(len(self.eigenvalues),dtype=int)
             self.nconv = len(self.eigenvalues)
         elif(self.eigsolver=='SlepcMumps' or self.eigsolver=='SlepcSuperlu_dist' or self.eigsolver=='SlepcSuperlu'):
             ainf = scipy.sparse.linalg.norm(A,ord=np.inf)

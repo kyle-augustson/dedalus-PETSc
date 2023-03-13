@@ -163,7 +163,11 @@ class MultistepIMEX:
                     np.copyto(sp.LHS.data, a0*sp.M_exp.data + b0*sp.L_exp.data)  # CREATES TEMPORARY
                 else:
                     sp.LHS = (a0*sp.M_min + b0*sp.L_min) @ sp.pre_right  # CREATES TEMPORARY
-                sp.LHS_solver = solver.matsolver(sp.LHS, solver)
+                #sp.LHS_solver = solver.matsolver(sp.LHS, solver)
+                if (sp.LHS_solver == None):
+                    sp.LHS_solver = solver.matsolver(sp.LHS,solver)
+                else:
+                    sp.LHS_solver.update(sp.LHS,solver)
             # Slice out valid subdata, skipping invalid components
             spRHS = RHS.get_subdata(sp)[:sp.LHS.shape[0]]
             spX = sp.LHS_solver.solve(spRHS)  # CREATES TEMPORARY
@@ -623,7 +627,11 @@ class RungeKuttaIMEX:
                         np.copyto(sp.LHS.data, sp.M_exp.data + (k*H[i,i])*sp.L_exp.data)  # CREATES TEMPORARY
                     else:
                         sp.LHS = (sp.M_min + (k*H[i,i])*sp.L_min) @ sp.pre_right  # CREATES TEMPORARY
-                    sp.LHS_solvers[i] = solver.matsolver(sp.LHS, solver)
+                    #sp.LHS_solvers[i] = solver.matsolver(sp.LHS, solver)
+                    if (sp.LHS_solvers[i] == None):
+                        sp.LHS_solvers[i] = solver.matsolver(sp.LHS,solver)
+                    else:
+                        sp.LHS_solvers[i].update(sp.LHS,solver)
                 # Slice out valid subdata, skipping invalid components
                 spRHS = RHS.get_subdata(sp)[:sp.LHS.shape[0]]
                 spX = sp.LHS_solvers[i].solve(spRHS)  # CREATES TEMPORARY

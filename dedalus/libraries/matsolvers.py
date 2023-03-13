@@ -5,7 +5,9 @@ import scipy.linalg as sla
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 from functools import partial
-
+from mpi4py import MPI
+import petsc4py
+from petsc4py import PETSc
 
 matsolvers = {}
 def add_solver(solver):
@@ -17,12 +19,17 @@ class SolverBase:
     """Abstract base class for all solvers."""
 
     config = {}
-
-    def __init__(self, matrix, solver=None):
+    def __init__(self, matrix, solver=None, *args, **kwargs):
         pass
 
-    def solve(self, vector):
+    def solve(self, vector, *args, **kwargs):
         pass
+    
+    #def __init__(self, matrix, solver=None):
+    #    pass
+
+    #def solve(self, vector):
+    #    pass
 
 
 @add_solver
@@ -72,6 +79,9 @@ class UmfpackSpsolve(SparseSolver):
         from scikits import umfpack
         self.matrix = matrix.copy()
 
+    def update(self, matrix, solver=None):
+        self.matrix = matrix.copy()
+        
     def solve(self, vector):
         return spla.spsolve(self.matrix, vector, use_umfpack=True)
 
@@ -83,6 +93,9 @@ class SuperluNaturalSpsolve(SparseSolver):
     def __init__(self, matrix, solver=None):
         self.matrix = matrix.copy()
 
+    def update(self, matrix, solver=None):
+        self.matrix = matrix.copy()
+        
     def solve(self, vector):
         return spla.spsolve(self.matrix, vector, permc_spec='NATURAL', use_umfpack=False)
 
@@ -94,6 +107,9 @@ class SuperluColamdSpsolve(SparseSolver):
     def __init__(self, matrix, solver=None):
         self.matrix = matrix.copy()
 
+    def update(self, matrix, solver=None):
+        self.matrix = matrix.copy()
+        
     def solve(self, vector):
         return spla.spsolve(self.matrix, vector, permc_spec='COLAMD', use_umfpack=False)
 
@@ -106,6 +122,9 @@ class UmfpackFactorized(SparseSolver):
         from scikits import umfpack
         self.LU = spla.factorized(matrix.tocsc())
 
+    def update(self, matrix, solver=None):
+        self.LU = spla.factorized(matrix.tocsc())
+        
     def solve(self, vector):
         return self.LU(vector)
 
@@ -117,6 +136,9 @@ class SuperluNaturalFactorized(SparseSolver):
     def __init__(self, matrix, solver=None):
         self.LU = spla.splu(matrix.tocsc(), permc_spec='NATURAL')
 
+    def update(self, matrix, solver=None):
+        self.LU = spla.splu(matrix.tocsc(), permc_spec='NATURAL')
+        
     def solve(self, vector):
         return self.LU.solve(vector)
 
@@ -128,6 +150,9 @@ class SuperluNaturalFactorizedTranspose(SparseSolver):
     def __init__(self, matrix, solver=None):
         self.LU = spla.splu(matrix.T.tocsc(), permc_spec='NATURAL')
 
+    def update(self, matrix, solver=None):
+        self.LU = spla.splu(matrix.T.tocsc(), permc_spec='NATURAL')
+        
     def solve(self, vector):
         return self.LU.solve(vector, trans='T')
 
@@ -137,6 +162,9 @@ class SuperluColamdFactorized(SparseSolver):
     """SuperLU+COLAMD LU factorized solve."""
 
     def __init__(self, matrix, solver=None):
+        self.LU = spla.splu(matrix.tocsc(), permc_spec='COLAMD')
+
+    def update(self, matrix, solver=None):
         self.LU = spla.splu(matrix.tocsc(), permc_spec='COLAMD')
 
     def solve(self, vector):
@@ -150,6 +178,9 @@ class ScipyBanded(BandedSolver):
     def __init__(self, matrix, solver=None):
         self.lu, self.ab = self.sparse_to_banded(matrix)
 
+    def update(self, matrix, solver=None):
+        self.lu, self.ab = self.sparse_to_banded(matrix)
+        
     def solve(self, vector):
         return sla.solve_banded(self.lu, self.ab, vector, check_finite=False)
 
@@ -162,6 +193,9 @@ class SPQR_solve(SparseSolver):
         import sparseqr
         self.matrix = matrix.copy()
 
+    def update(self, matrix, solver=None):
+        self.matrix = matrix.copy()
+        
     def solve(self, vector):
         return sparseqr.solve(self.matrix, vector)
 
@@ -175,6 +209,10 @@ class BandedQR(BandedSolver):
         matrix = pybanded.BandedMatrix.from_sparse(matrix)
         self.QR = pybanded.BandedQR(matrix)
 
+    def update(self, matrix, solver=None):
+        matrix = pybanded.BandedMatrix.from_sparse(matrix)
+        self.QR = pybanded.BandedQR(matrix)
+        
     def solve(self, vector):
         return self.QR.solve(vector)
 
@@ -186,6 +224,9 @@ class SparseInverse(SparseSolver):
     def __init__(self, matrix, solver=None):
         self.matrix_inverse = spla.inv(matrix.tocsc())
 
+    def update(self, matrix, solver=None):
+        self.matrix_inverse = sla.inv(matrix.A)
+        
     def solve(self, vector):
         return self.matrix_inverse @ vector
 
@@ -197,6 +238,9 @@ class DenseInverse(DenseSolver):
     def __init__(self, matrix, solver=None):
         self.matrix_inverse = sla.inv(matrix.A)
 
+    def update(self, matrix, solver=None):
+        self.matrix_inverse = sla.inv(matrix.A)
+        
     def solve(self, vector):
         return self.matrix_inverse @ vector
 
@@ -224,6 +268,24 @@ class BlockInverse(BandedSolver):
             self.matrix_inverse = same_dense_block_diag(list(inv_blocks), format='csr')
             self.solve = self._solve_block
 
+    def update(self, matrix, solver):
+        # Check separability
+        if solver.domain.bases[-1].coupled:
+            raise ValueError("Block solver requires uncoupled problems.")
+        block_size = b = len(solver.problem.variables)
+        # Produce inverse
+        if block_size == 1:
+            # Special-case diagonal matrices
+            self.matrix_inv_diagonal = 1 / matrix.todia().data[0]
+            self.solve = self._solve_diag
+        else:
+            # Covert to BSR to extract blocks
+            bsr_matrix = matrix.tobsr(blocksize=(b, b))
+            # Compute block inverses
+            inv_blocks = np.linalg.inv(bsr_matrix.data)
+            self.matrix_inverse = same_dense_block_diag(list(inv_blocks), format='csr')
+            self.solve = self._solve_block
+            
     def _solve_block(self, vector):
         return self.matrix_inverse @ vector
 
@@ -237,8 +299,96 @@ class ScipyDenseLU(DenseSolver):
     def __init__(self, matrix, solver=None):
         self.LU = sla.lu_factor(matrix.A, check_finite=False)
 
+    def update(self, matrix, solver=None):
+        self.LU = sla.lu_factor(matrix.A, check_finite=False)
+
     def solve(self, vector):
         return sla.lu_solve(self.LU, vector, check_finite=False)
+
+@add_solver
+class PETScMumpsSparseSolver(SparseSolver):
+
+    def __init__(self, matrix, solver=None,**kw):
+        params=kw['params']
+        #No multinode comm for now, until I figure out how to pass it in.
+        self.comm = MPI.COMM_SELF
+        self.opts = PETSc.Options()
+        if (params!=None):
+            print("Setting solver parameter(s) "+params)
+            tmp = params[1:-1]
+            tmp = tmp.split(" ")
+            nterms = len(tmp)
+            names = tmp[0:nterms:2]
+            vals = tmp[1:nterms:2]
+            nparams = len(names)
+            self.icntls=[]
+            for kk in range(nparams):
+                tmp = names[kk].split("-")
+                name = tmp[1]
+                tmp = name.split("_")
+                if (tmp[1]=='mumps' and tmp[2]=='icntl'):
+                    self.icntls.append([int(tmp[3]),int(vals[kk])])
+
+        #Setup matrices in petsc format
+        self.Ap = PETSc.Mat().createAIJ(size=matrix.shape,csr=(matrix.indptr, matrix.indices,matrix.data),comm=self.comm)
+        self.Ap.assemble()
+        matrix = np.zeros(1,dtype=int)
+
+        #logger.info("Setting up solver")
+        self.KSP = PETSc.KSP().create(comm=self.comm)
+        self.KSP.setFromOptions()
+        self.KSP.setType('preonly')
+        self.KSP.setOperators(self.Ap)
+
+        #logger.info("Setting up LU Preconditioner")
+        self.PC = self.KSP.getPC()
+        self.PC.setFromOptions()
+        self.PC.setType('lu')
+        if (solver_type=='SlepcMumps'):
+            self.PC.setFactorSolverType('mumps')
+        else:
+            raise NotImplementedError("PETSc solver type not implemented.")
+
+        logger.info("Setting up LU matrix")
+        self.PC.setFactorSetUpSolverType()
+        self.K = PC.getFactorMatrix()
+        self.K.setFromOptions()
+        if (solver_type=='SlepcMumps'):
+            for kk in range(len(icntls)):
+                self.K.setMumpsIcntl(self.icntls[kk][0],self.icntls[kk][1])
+
+        self.sol = self.Ap.createVecRight()
+        self.rhs = self.Ap.createVecLeft()
+
+    def update(self,matrix,solver=None):
+        self.Ap.destroy()
+        self.Ap = PETSc.Mat().createAIJ(size=matrix.shape,csr=(matrix.indptr, matrix.indices,matrix.data),comm=self.comm)
+        self.Ap.assemble()
+        matrix = np.zeros(1,dtype=int)
+        self.KSP.setOperators(self.Ap)
+        self.sol = self.Ap.createVecRight()
+        self.rhs = self.Ap.createVecLeft()
+    
+    def solve(self,vector):
+        self.rhs.setArray(vector)
+        self.KSP.solve(self.rhs,self.sol)
+        return self.sol.getArray()
+    
+#@add_solver
+#class MumpsSparseSolverExternal(SparseSolver):
+    
+#    def __init__(self, matrix, solver=None):
+#        from .solvers import mumps_solver as mumps
+
+#        self.mumpsSolver = mumps.MumpsSolver
+#        self.mumpsSolver.mumps_full_init(matrix.shape,len(matrix.data),matrix.indptr,matrix.indices,matrix.data)
+#        matrix = np.zeros(1,dtype=int)
+
+#    def update(self,matrix,solver=None):
+#        self.mumpsSolver.mumps_reinit(matrix)
+        
+#    def solve(self, vector):
+#        return self.mumpsSolver.mumps_solve(vector)
 
 
 class Woodbury(SparseSolver):
