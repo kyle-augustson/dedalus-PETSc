@@ -306,28 +306,42 @@ class ScipyDenseLU(DenseSolver):
         return sla.lu_solve(self.LU, vector, check_finite=False)
 
 @add_solver
-class PETScMumpsSparseSolver(SparseSolver):
+class PETScSparseSolver(SparseSolver):
 
-    def __init__(self, matrix, solver=None,**kw):
-        params=kw['params']
+    def __init__(self, matrix, solver=None):
+        from ..tools.config import config
+        solver_type=config['linear algebra']['MATRIX_EIGENSOLVER']
+        params=config['linear algebra']['MATRIX_EIGENSOLVER_PARAMS']
         #No multinode comm for now, until I figure out how to pass it in.
         self.comm = MPI.COMM_SELF
         self.opts = PETSc.Options()
         if (params!=None):
-            print("Setting solver parameter(s) "+params)
+            #logger.debug("Setting solver parameter(s) "+params)
             tmp = params[1:-1]
             tmp = tmp.split(" ")
             nterms = len(tmp)
             names = tmp[0:nterms:2]
             vals = tmp[1:nterms:2]
             nparams = len(names)
-            self.icntls=[]
+            icntls=[]
+            cntls=[]
+            #set_omp_threads=1
             for kk in range(nparams):
                 tmp = names[kk].split("-")
                 name = tmp[1]
                 tmp = name.split("_")
-                if (tmp[1]=='mumps' and tmp[2]=='icntl'):
-                    self.icntls.append([int(tmp[3]),int(vals[kk])])
+                if (solver_type=='SlepcMumps'):
+                    if (tmp[1]=='mumps' and tmp[2]=='icntl'):
+                        self.opts[name]=int(vals[kk])
+                    if (tmp[1]=='mumps' and tmp[2]=='cntl'):
+                        self.opts[name]=float(vals[kk])
+                elif (solver_type=='SlepcSuperlu_dist'):
+                    self.opts[name]=vals[kk]
+                elif (solver_type=='SlepcSuperlu'):
+                    if (tmp[2]=='ilu'):
+                        self.opts[name]=float(vals[kk])
+                    else:
+                        self.opts[name]=vals[kk]
 
         #Setup matrices in petsc format
         self.Ap = PETSc.Mat().createAIJ(size=matrix.shape,csr=(matrix.indptr, matrix.indices,matrix.data),comm=self.comm)
@@ -346,19 +360,25 @@ class PETScMumpsSparseSolver(SparseSolver):
         self.PC.setType('lu')
         if (solver_type=='SlepcMumps'):
             self.PC.setFactorSolverType('mumps')
+        elif (solver_type=='SlepcSuperlu_dist'):
+            self.PC.setFactorSolverType('superlu_dist')
+        elif (solver_type=='SlepcSuperlu'):
+            self.PC.setFactorSolverType('superlu')
         else:
             raise NotImplementedError("PETSc solver type not implemented.")
 
-        logger.info("Setting up LU matrix")
+        #logger.info("Setting up LU matrix")
         self.PC.setFactorSetUpSolverType()
-        self.K = PC.getFactorMatrix()
+        self.K = self.PC.getFactorMatrix()
         self.K.setFromOptions()
-        if (solver_type=='SlepcMumps'):
-            for kk in range(len(icntls)):
-                self.K.setMumpsIcntl(self.icntls[kk][0],self.icntls[kk][1])
 
         self.sol = self.Ap.createVecRight()
         self.rhs = self.Ap.createVecLeft()
+        tmp = self.sol.getArray()
+        tsize = len(tmp)
+        tdtype = tmp.dtype
+        tmp = 0
+        self.out = np.zeros((tsize,1),dtype=tdtype)
 
     def update(self,matrix,solver=None):
         self.Ap.destroy()
@@ -372,24 +392,8 @@ class PETScMumpsSparseSolver(SparseSolver):
     def solve(self,vector):
         self.rhs.setArray(vector)
         self.KSP.solve(self.rhs,self.sol)
-        return self.sol.getArray()
-    
-#@add_solver
-#class MumpsSparseSolverExternal(SparseSolver):
-    
-#    def __init__(self, matrix, solver=None):
-#        from .solvers import mumps_solver as mumps
-
-#        self.mumpsSolver = mumps.MumpsSolver
-#        self.mumpsSolver.mumps_full_init(matrix.shape,len(matrix.data),matrix.indptr,matrix.indices,matrix.data)
-#        matrix = np.zeros(1,dtype=int)
-
-#    def update(self,matrix,solver=None):
-#        self.mumpsSolver.mumps_reinit(matrix)
-        
-#    def solve(self, vector):
-#        return self.mumpsSolver.mumps_solve(vector)
-
+        self.out[:,0] = self.sol.getArray()
+        return self.out
 
 class Woodbury(SparseSolver):
     """Solve top & right bordered matrix using Woodbury formula."""
