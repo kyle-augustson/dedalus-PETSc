@@ -197,6 +197,11 @@ class EigenvalueSolver(SolverBase):
         # Solve as dense general eigenvalue problem
         A = (sp.L_min @ sp.pre_right).A
         B = - (sp.M_min @ sp.pre_right).A
+        ainf = scipy.sparse.linalg.norm(A,ord=np.inf)
+        A = A/ainf
+        B = B/ainf
+        logger.debug('Shape of A:{}'.format(A.shape))
+        logger.debug('Inifity Norm of A:{}'.format(ainf))
         eig_output = scipy.linalg.eig(A, b=B, left=left, **kw)
         # Unpack output
         if left:
@@ -251,6 +256,11 @@ class EigenvalueSolver(SolverBase):
 
         A = (sp.L_min @ sp.pre_right)
         B = - (sp.M_min @ sp.pre_right)
+        ainf = scipy.sparse.linalg.norm(A,ord=np.inf)
+        A = A/ainf
+        B = B/ainf
+        logger.debug('Shape of A:{}'.format(A.shape))
+        logger.debug('Inifity Norm of A:{}'.format(ainf))
         if eigv:
             eigvpre = eigv@sp.pre_right
         else:
@@ -296,7 +306,9 @@ class EigenvalueSolver(SolverBase):
             ainf = scipy.sparse.linalg.norm(A,ord=np.inf)
             A = A.T/ainf
             B = B.T/ainf
+
             logger.debug('Shape of A:{}'.format(A.shape))
+            logger.debug('Inifity Norm of A:{}'.format(ainf))
             self.eigenvalues, pre_eigenvectors, self.errors, self.iters, self.nconv = slepc_target_wrapper(comm=self.dist.comm, A=A, B=B, N=N, target=target, eigv=eigvpre, solver_type=self.eigsolver, params=self.eigparams, **kw)
 
             self.eigenvectors = sp.pre_right @ pre_eigenvectors
