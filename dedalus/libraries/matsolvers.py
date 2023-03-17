@@ -395,6 +395,97 @@ class PETScSparseSolver(SparseSolver):
         self.out[:,0] = self.sol.getArray()
         return self.out
 
+@add_solver
+class PETScGMRESSolver(SparseSolver):
+
+    def __init__(self, matrix, solver=None):
+        from ..tools.config import config
+        solver_type=config['linear algebra']['MATRIX_EIGENSOLVER']
+        params=config['linear algebra']['MATRIX_EIGENSOLVER_PARAMS']
+        #No multinode comm for now, until I figure out how to pass it in.
+        self.comm = MPI.COMM_SELF
+        self.opts = PETSc.Options()
+        if (params!=None):
+            #logger.debug("Setting solver parameter(s) "+params)
+            tmp = params[1:-1]
+            tmp = tmp.split(" ")
+            nterms = len(tmp)
+            names = tmp[0:nterms:2]
+            vals = tmp[1:nterms:2]
+            nparams = len(names)
+            icntls=[]
+            cntls=[]
+            #set_omp_threads=1
+            for kk in range(nparams):
+                tmp = names[kk].split("-")
+                name = tmp[1]
+                tmp = name.split("_")
+                if (solver_type=='SlepcMumps'):
+                    if (tmp[1]=='mumps' and tmp[2]=='icntl'):
+                        self.opts[name]=int(vals[kk])
+                    if (tmp[1]=='mumps' and tmp[2]=='cntl'):
+                        self.opts[name]=float(vals[kk])
+                elif (solver_type=='SlepcSuperlu_dist'):
+                    self.opts[name]=vals[kk]
+                elif (solver_type=='SlepcSuperlu'):
+                    if (tmp[2]=='ilu'):
+                        self.opts[name]=float(vals[kk])
+                    else:
+                        self.opts[name]=vals[kk]
+
+        #Setup matrices in petsc format
+        self.Ap = PETSc.Mat().createAIJ(size=matrix.shape,csr=(matrix.indptr, matrix.indices,matrix.data),comm=self.comm)
+        self.Ap.assemble()
+        matrix = np.zeros(1,dtype=int)
+
+        #logger.info("Setting up solver")
+        self.KSP = PETSc.KSP().create(comm=self.comm)
+        self.KSP.setFromOptions()
+        self.KSP.setType('gmres')
+        self.KSP.setOperators(self.Ap)
+
+        #logger.info("Setting up ILU Preconditioner")
+        self.PC = self.KSP.getPC()
+        self.PC.setFromOptions()
+        self.PC.setType('ilu')
+        if (solver_type=='SlepcMumps'):
+            self.PC.setFactorSolverType('mumps')
+        elif (solver_type=='SlepcSuperlu_dist'):
+            self.PC.setFactorSolverType('superlu_dist')
+        elif (solver_type=='SlepcSuperlu'):
+            self.PC.setFactorSolverType('superlu')
+        else:
+            raise NotImplementedError("PETSc solver type not implemented.")
+
+        #logger.info("Setting up ILU matrix")
+        self.PC.setFactorSetUpSolverType()
+        self.PC.setFactorLevels(5)
+        self.K = self.PC.getFactorMatrix()
+        self.K.setFromOptions()
+
+        self.sol = self.Ap.createVecRight()
+        self.rhs = self.Ap.createVecLeft()
+        tmp = self.sol.getArray()
+        tsize = len(tmp)
+        tdtype = tmp.dtype
+        tmp = 0
+        self.out = np.zeros((tsize,1),dtype=tdtype)
+
+    def update(self,matrix,solver=None):
+        self.Ap.destroy()
+        self.Ap = PETSc.Mat().createAIJ(size=matrix.shape,csr=(matrix.indptr, matrix.indices,matrix.data),comm=self.comm)
+        self.Ap.assemble()
+        matrix = np.zeros(1,dtype=int)
+        self.KSP.setOperators(self.Ap)
+        self.sol = self.Ap.createVecRight()
+        self.rhs = self.Ap.createVecLeft()
+    
+    def solve(self,vector):
+        self.rhs.setArray(vector)
+        self.KSP.solve(self.rhs,self.sol)
+        self.out[:,0] = self.sol.getArray()
+        return self.out
+
 class Woodbury(SparseSolver):
     """Solve top & right bordered matrix using Woodbury formula."""
 
