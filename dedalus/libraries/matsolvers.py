@@ -126,7 +126,7 @@ class UmfpackFactorized(SparseSolver):
         self.LU = spla.factorized(matrix.tocsc())
         
     def solve(self, vector):
-        return self.LU(vector)
+        return self.LU(vector.flatten())
 
 
 @add_solver
@@ -134,10 +134,10 @@ class SuperluNaturalFactorized(SparseSolver):
     """SuperLU+NATURAL LU factorized solve."""
 
     def __init__(self, matrix, solver=None):
-        self.LU = spla.splu(matrix.tocsc(), permc_spec='NATURAL')
+        self.LU = spla.splu(matrix.tocsc(), permc_spec='NATURAL', options=dict(IterRefine='EXTRA'))
 
     def update(self, matrix, solver=None):
-        self.LU = spla.splu(matrix.tocsc(), permc_spec='NATURAL')
+        self.LU = spla.splu(matrix.tocsc(), permc_spec='NATURAL', options=dict(IterRefine='EXTRA'))
         
     def solve(self, vector):
         return self.LU.solve(vector)
@@ -148,14 +148,26 @@ class SuperluNaturalFactorizedTranspose(SparseSolver):
     """SuperLU+NATURAL LU factorized solve."""
 
     def __init__(self, matrix, solver=None):
-        self.LU = spla.splu(matrix.T.tocsc(), permc_spec='NATURAL')
+        self.LU = spla.splu(matrix.T.tocsc(), permc_spec='NATURAL', options=dict(IterRefine='EXTRA'))
 
     def update(self, matrix, solver=None):
-        self.LU = spla.splu(matrix.T.tocsc(), permc_spec='NATURAL')
+        self.LU = spla.splu(matrix.T.tocsc(), permc_spec='NATURAL', options=dict(IterRefine='EXTRA'))
         
     def solve(self, vector):
         return self.LU.solve(vector, trans='T')
 
+@add_solver
+class SuperluColamdFactorizedTranspose(SparseSolver):
+    """SuperLU+COLAMD LU factorized solve."""
+
+    def __init__(self, matrix, solver=None):
+        self.LU = spla.splu(matrix.T.tocsc(), permc_spec='COLAMD',options=dict(IterRefine='EXTRA'))
+
+    def update(self, matrix, solver=None):
+        self.LU = spla.splu(matrix.T.tocsc(), permc_spec='COLAMD', options=dict(IterRefine='EXTRA'))
+
+    def solve(self, vector):
+        return self.LU.solve(vector,trans='T')
 
 @add_solver
 class SuperluColamdFactorized(SparseSolver):
@@ -170,7 +182,16 @@ class SuperluColamdFactorized(SparseSolver):
     def solve(self, vector):
         return self.LU.solve(vector)
 
+@add_solver
+class SuperILUFactorizedTranspose(SparseSolver):
+    """SuperLU ILU factorized solve."""
 
+    def __init__(self, matrix, solver=None):
+        self.LU = spla.spilu(matrix.T.tocsc(), drop_tol=1e-6, fill_factor=4, permc_spec='COLAMD', diag_pivot_thresh=0.01)
+
+    def solve(self, vector):
+        return self.LU.solve(vector, trans='T')
+    
 @add_solver
 class ScipyBanded(BandedSolver):
     """Scipy banded solve."""
@@ -349,6 +370,7 @@ class PETScSparseSolver(SparseSolver):
         matrix = np.zeros(1,dtype=int)
 
         #logger.info("Setting up solver")
+        #print("Setting up solver")
         self.KSP = PETSc.KSP().create(comm=self.comm)
         self.KSP.setFromOptions()
         self.KSP.setType('preonly')
@@ -439,6 +461,7 @@ class PETScGMRESSolver(SparseSolver):
         matrix = np.zeros(1,dtype=int)
 
         #logger.info("Setting up solver")
+        #print("Setting up solver")
         self.KSP = PETSc.KSP().create(comm=self.comm)
         self.KSP.setFromOptions()
         self.KSP.setType('gmres')

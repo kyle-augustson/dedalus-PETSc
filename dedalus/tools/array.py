@@ -1,5 +1,4 @@
 """Tools for array manipulations."""
-
 import numpy as np
 from scipy import sparse
 import scipy.sparse as sp
@@ -335,7 +334,7 @@ def drop_empty_rows(mat):
     return mat[nonempty_rows]
 
 
-def scipy_sparse_eigs(A, B, N, target, matsolver, eigv, **kw):
+def scipy_sparse_eigs(A, B, N, target, matsolver, whicheig, eigv, invert, P, **kw):
     """
     Perform targeted eigenmode search using the scipy/ARPACK sparse solver
     for the reformulated generalized eigenvalue problem
@@ -360,32 +359,58 @@ def scipy_sparse_eigs(A, B, N, target, matsolver, eigv, **kw):
     # Build sparse linear operator representing (A - σB)^I B = C^I B = D
     import logging
     logger = logging.getLogger(__name__)
-    C = A - target * B
-    solver = matsolver(C)
-    def matvec(x):
-        return solver.solve(B.dot(x))
+    if invert:
+        C = B - A/target
+        solverC = matsolver(C)
+        def matvec(x):
+            return solverC.solve(A.dot(x))
+    else:
+        C = A - target * B
+        solverC = matsolver(C)
+        def matvec(x):
+            return solverC.solve(B.dot(x))   
+
+    if (P is not None):
+        solverP = matsolver(P)
+        C = A - target * B
+        solverC = matsolver(C)
+        def matvec(x):
+            return solverP.solve(P.dot(solverC.solve(B.dot(x))))
+    else:
+        C = A - target * B
+        solverC = matsolver(C)
+        def matvec(x):
+            return solverC.solve(B.dot(x))        
+
     D = spla.LinearOperator(dtype=A.dtype, shape=A.shape, matvec=matvec)
     # Solve using scipy sparse algorithm
-    evals, evecs = spla.eigs(D, k=N, which='LM', sigma=None, v0=eigv, tol=1e-25, **kw)
+    evals, evecs = spla.eigs(D, k=N, which=whicheig, sigma=None, v0=eigv, ncv=int(5*N),tol=1e-50,maxiter=int(N*100),**kw)
     # Rectify eigenvalues
-    evals = 1 / evals + target
+    if invert:
+        evals = evals*target/(evals+target)
+    else:
+        evals = 1 / evals + target
 
+    C = 0
+    D = 0
+    solverC = 0
     return evals, evecs
 
 def slepc_target_wrapper(comm,A, B, N, target, eigv, solver_type, params, **kw):
-    """                                                                                                                             
+    """                    
     Perform targeted eigenmode search using the SLEPc parallel sparse solver 
     for the reformulated generalized eigenvalue problem  
     A.x = λ B.x  ==>  (A - σB)^I B.x = (1/(λ-σ)) x f
-    or eigenvalues λ near the target σ.                                                                                            
-    Parameters                                                                                                                     
+    or eigenvalues λ near the target σ.
+                   
+    Parameters
     ---------- 
     A, B : scipy sparse matrices
     Sparse matrices for generalized eigenvalue problem
     N : int
     Number of eigenmodes to return
     target : complex
-    Target σ for eigenvalue search                                                                                                
+    Target σ for eigenvalue search              
     Other keyword options passed to scipy.sparse.linalg.eigs.
     """
     import os

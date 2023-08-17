@@ -197,11 +197,6 @@ class EigenvalueSolver(SolverBase):
         # Solve as dense general eigenvalue problem
         A = (sp.L_min @ sp.pre_right).A
         B = - (sp.M_min @ sp.pre_right).A
-        ainf = scipy.sparse.linalg.norm(A,ord=np.inf)
-        A = A/ainf
-        B = B/ainf
-        logger.debug('Shape of A:{}'.format(A.shape))
-        logger.debug('Inifity Norm of A:{}'.format(ainf))
         eig_output = scipy.linalg.eig(A, b=B, left=left, **kw)
         # Unpack output
         if left:
@@ -214,11 +209,11 @@ class EigenvalueSolver(SolverBase):
             self.eigenvalues, pre_eigenvectors = eig_output
             self.eigenvectors = sp.pre_right @ pre_eigenvectors
 
-        self.errors = np.zeros(len(self.eigenvalues),dtype=np.float64)
-        self.iters = np.zeros(len(self.eigenvalues),dtype=int)
+        self.errors = self.eigenvalues*0
+        self.iters = 0
         self.nconv = len(self.eigenvalues)
 
-    def solve_sparse(self, subproblem, N, target, eigv=None, rebuild_matrices=False, left=False, normalize_left=True, raise_on_mismatch=True, **kw):
+    def solve_sparse(self, subproblem, N, target, Mats=None, whicheig='LM', eigv=None, invert=False, P=None, rebuild_matrices=False, left=False, normalize_left=True, raise_on_mismatch=True, **kw):
         """
         Perform targeted sparse eigenvector search for selected subproblem.
         This routine finds a subset of eigenvectors near the specified target.
@@ -249,29 +244,46 @@ class EigenvalueSolver(SolverBase):
             Other keyword options passed to scipy.sparse.linalg.eig.
         """
         self.eigenvalue_subproblem = sp = subproblem
-        # Rebuild matrices if directed or not yet built
-        if rebuild_matrices or not hasattr(sp, 'L_min'):
-            subsystems.build_subproblem_matrices(self, [sp], ['M', 'L'])
-        # Solve as sparse general eigenvalue problem
-
-        A = (sp.L_min @ sp.pre_right)
-        B = - (sp.M_min @ sp.pre_right)
-        ainf = scipy.sparse.linalg.norm(A,ord=np.inf)
-        A = A/ainf
-        B = B/ainf
-        logger.debug('Shape of A:{}'.format(A.shape))
-        logger.debug('Inifity Norm of A:{}'.format(ainf))
-        if eigv:
-            eigvpre = eigv@sp.pre_right
+        if (Mats is not None):
+            A = Mats[0]
+            B = Mats[1]
+            pre = Mats[2]
         else:
+            # Rebuild matrices if directed or not yet built
+            if rebuild_matrices or not hasattr(sp, 'L_min'):
+                subsystems.build_subproblem_matrices(self, [sp], ['M', 'L'])
+            # Solve as sparse general eigenvalue problem
+            A = (sp.L_min @ sp.pre_right)
+            B = - (sp.M_min @ sp.pre_right)
+            pre = sp.pre_right
+
+        #ainf = scipy.sparse.linalg.norm(A,ord=np.inf)
+        #A = A/ainf
+        #B = B/ainf
+        logger.debug('Shape of A:{}'.format(A.shape))
+        #logger.debug('Inifity Norm of A:{}'.format(ainf))
+        if (eigv is None):
             eigvpre = None
-        
+        else:
+            eigvpre = eigv@pre
+
+        if P:
+            Adiag = A.diagonal()
+            Amax = np.max(np.abs(Adiag))
+            Adiag = Adiag/Amax
+            Adiag[np.where(np.abs(Adiag)<1e-8)] = 1
+            import scipy.sparse as sparse
+            Precond = sparse.diags(Adiag,dtype=A.dtype,format='csr') - (target/Amax) * B
+        else:
+            Precond = None
+
         if (self.eigsolver=='ScipySparseEigs'):
-            
             # Solve for the right eigenvectors
-            self.eigenvalues, pre_eigenvectors = scipy_sparse_eigs(A=A, B=B, N=N, target=target, matsolver=self.matsolver, eigv=eigvpre, **kw)
-            self.eigenvectors = sp.pre_right @ pre_eigenvectors
+            self.eigenvalues, pre_eigenvectors = scipy_sparse_eigs(A=A, B=B, N=N, target=target, matsolver=self.matsolver, whicheig=whicheig, eigv=eigvpre, invert=invert, P=Precond, **kw)
+            self.eigenvectors = pre @ pre_eigenvectors
+
             logger.debug("Eigenvalue | Absolute Error | Relative Error")
+            self.errors = np.zeros(len(self.eigenvalues),dtype=np.float64)
             for ii in range(len(self.eigenvalues)):
                 eval = self.eigenvalues[ii]
                 evec = pre_eigenvectors[:,ii]
@@ -279,6 +291,7 @@ class EigenvalueSolver(SolverBase):
                 relerr =np.abs(np.sum((np.conj(evec.T)).dot((A-eval*B).dot(evec))))
                 abserr = relerr/denom
                 logger.debug('%9f+%9fj | %12g | %12g' % (eval.real, eval.imag, abserr, relerr))
+                self.errors[ii] = abserr
             if left:
                 # Solve for the left eigenvectors
                 # Note: this definition of "left eigenvectors" is consistent with the documentation for scipy.linalg.eig
@@ -299,19 +312,18 @@ class EigenvalueSolver(SolverBase):
                 if normalize_left:
                     self._normalize_left_eigenvectors()
                 self.modified_left_eigenvectors = self._build_modified_left_eigenvectors()
-            self.errors = np.zeros(len(self.eigenvalues),dtype=np.float64)
+
             self.iters = np.zeros(len(self.eigenvalues),dtype=int)
             self.nconv = len(self.eigenvalues)
         elif(self.eigsolver=='SlepcMumps' or self.eigsolver=='SlepcSuperlu_dist' or self.eigsolver=='SlepcSuperlu'):
             ainf = scipy.sparse.linalg.norm(A,ord=np.inf)
             A = A.T/ainf
             B = B.T/ainf
-
             logger.debug('Shape of A:{}'.format(A.shape))
             logger.debug('Inifity Norm of A:{}'.format(ainf))
             self.eigenvalues, pre_eigenvectors, self.errors, self.iters, self.nconv = slepc_target_wrapper(comm=self.dist.comm, A=A, B=B, N=N, target=target, eigv=eigvpre, solver_type=self.eigsolver, params=self.eigparams, **kw)
 
-            self.eigenvectors = sp.pre_right @ pre_eigenvectors
+            self.eigenvectors = pre @ pre_eigenvectors
             if left:
                 raise NotImplementedError()
             
